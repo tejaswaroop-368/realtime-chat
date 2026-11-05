@@ -124,16 +124,48 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            payload = json.loads(data)
+            client_message_id = None
+            try:
+                message_payload = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({
+                    "event": "message_ack",
+                    "ok": False,
+                    "client_message_id": client_message_id,
+                    "message": "Invalid message format."
+                }))
+                continue
+
+            if not isinstance(message_payload, dict):
+                await websocket.send_text(json.dumps({
+                    "event": "message_ack",
+                    "ok": False,
+                    "client_message_id": client_message_id,
+                    "message": "Invalid message format."
+                }))
+                continue
             
-            chat_id = payload.get("chat_id")
-            content = payload.get("content")
+            client_message_id = message_payload.get("client_message_id")
+            chat_id = message_payload.get("chat_id")
+            content = message_payload.get("content")
             
             if not chat_id or not content:
+                await websocket.send_text(json.dumps({
+                    "event": "message_ack",
+                    "ok": False,
+                    "client_message_id": client_message_id,
+                    "message": "Chat and message content are required."
+                }))
                 continue
                 
             chat = database.get_collection("chats").find_one({"chat_id": chat_id, "participants": user_id})
             if not chat:
+                await websocket.send_text(json.dumps({
+                    "event": "message_ack",
+                    "ok": False,
+                    "client_message_id": client_message_id,
+                    "message": "You are not a participant in this chat."
+                }))
                 continue
                 
             message_id = str(uuid4())
@@ -145,7 +177,22 @@ async def websocket_endpoint(websocket: WebSocket):
                 "type": "text",
                 "timestamp": datetime.utcnow()
             }
-            database.get_collection("messages").insert_one(new_message)
+            result = database.get_collection("messages").insert_one(new_message)
+            if not result.acknowledged:
+                await websocket.send_text(json.dumps({
+                    "event": "message_ack",
+                    "ok": False,
+                    "client_message_id": client_message_id,
+                    "message": "Message could not be saved."
+                }))
+                continue
+
+            await websocket.send_text(json.dumps({
+                "event": "message_ack",
+                "ok": True,
+                "client_message_id": client_message_id,
+                "message": "Message saved."
+            }))
             
             # Broadcast to all participants
             broadcast_msg = {

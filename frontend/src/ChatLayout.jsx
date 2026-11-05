@@ -13,6 +13,7 @@ export default function ChatLayout() {
   const [activeChat, setActiveChat] = useState(null)
   const [messages, setMessages] = useState([])
   const [messageInput, setMessageInput] = useState('')
+  const [sendError, setSendError] = useState('')
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
@@ -22,6 +23,7 @@ export default function ChatLayout() {
   const ws = useRef(null)
   const activeChatRef = useRef(null)
   const messagesEndRef = useRef(null)
+  const pendingMessageRef = useRef(null)
 
   const navigate = useNavigate()
 
@@ -50,11 +52,29 @@ export default function ChatLayout() {
     const token = localStorage.getItem("token")
     if (!token) return;
 
-    const websocketBaseUrl = import.meta.env.VITE_CHAT_WS_URL || 'wss://edumoon-fs-ai-1.onrender.com/ws/chat';
+    const websocketBaseUrl = import.meta.env.VITE_CHAT_WS_URL || 'wss://realtime-chat-vp0n.onrender.com/ws/chat';
     ws.current = new WebSocket(`${websocketBaseUrl}?token=${token}`)
+
+    ws.current.onopen = () => setSendError('')
+    ws.current.onerror = () => setSendError('Message connection failed. Please try again.')
+    ws.current.onclose = () => setSendError('Message connection closed. Please refresh the page.')
 
     ws.current.onmessage = (event) => {
       const data = JSON.parse(event.data)
+      if (data.event === "message_ack") {
+        const pending = pendingMessageRef.current
+        if (!pending || data.client_message_id !== pending.clientMessageId) return
+
+        clearTimeout(pending.timeoutId)
+        pendingMessageRef.current = null
+        if (data.ok) {
+          setMessageInput('')
+          setSendError('')
+        } else {
+          setSendError(data.message || 'Message could not be sent.')
+        }
+        return
+      }
       if (data.event == "new_message") {
         setMessages(prev => {
           if (activeChatRef.current && data.message.chat_id === activeChatRef.current.id) {
@@ -66,6 +86,9 @@ export default function ChatLayout() {
     }
 
     return () => {
+      if (pendingMessageRef.current) {
+        clearTimeout(pendingMessageRef.current.timeoutId)
+      }
       if (ws.current) ws?.current?.close();
     }
   }, [])
@@ -147,14 +170,37 @@ export default function ChatLayout() {
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!messageInput.trim() || !activeChat || !ws.current) return;
+    const content = messageInput.trim()
+    if (!content || !activeChat) return;
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+      setSendError('Message connection is not ready. Please try again.')
+      return
+    }
+    if (pendingMessageRef.current) {
+      setSendError('Please wait for the current message to be sent.')
+      return
+    }
 
-    ws.current.send(JSON.stringify({
-      chat_id: activeChat.id,
-      content: messageInput
-    }));
-
-    setMessageInput('');
+    setSendError('')
+    const clientMessageId = crypto.randomUUID()
+    const timeoutId = window.setTimeout(() => {
+      if (pendingMessageRef.current?.clientMessageId === clientMessageId) {
+        pendingMessageRef.current = null
+        setSendError('Message acknowledgement timed out. Please try again.')
+      }
+    }, 10000)
+    pendingMessageRef.current = { clientMessageId, timeoutId }
+    try {
+      ws.current.send(JSON.stringify({
+        chat_id: activeChat.id,
+        content,
+        client_message_id: clientMessageId
+      }));
+    } catch (error) {
+      clearTimeout(timeoutId)
+      pendingMessageRef.current = null
+      setSendError('Message could not be sent. Please try again.')
+    }
   }
 
   const handleLogout = () => {
@@ -389,6 +435,7 @@ export default function ChatLayout() {
           {/* Message Input */}
           <Paper p={"md"} radius={0} withBorder>
               <form onSubmit={handleSendMessage}>
+                {sendError && <Text size="xs" c="red" mb="xs">{sendError}</Text>}
                 <Group wrap='nowrap'>
                   <TextInput
                     placeholder='Type a message'
