@@ -187,26 +187,29 @@ async def websocket_endpoint(websocket: WebSocket):
                 }))
                 continue
 
+            message_for_client = {
+                "id": message_id,
+                "chat_id": chat_id,
+                "sender_id": user_id,
+                "content": content,
+                "type": "text",
+                "timestamp": new_message["timestamp"].isoformat()
+            }
+
+            # Send the saved message to the sender in the acknowledgement.
             await websocket.send_text(json.dumps({
                 "event": "message_ack",
                 "ok": True,
                 "client_message_id": client_message_id,
-                "message": "Message saved."
+                "message": message_for_client
             }))
-            
-            # Broadcast to all participants
+
+            # Broadcast to all participants.
             broadcast_msg = {
                 "event": "new_message",
-                "message": {
-                    "id": message_id,
-                    "chat_id": chat_id,
-                    "sender_id": user_id,
-                    "content": content,
-                    "type": "text",
-                    "timestamp": new_message["timestamp"].isoformat()
-                }
+                "message": message_for_client
             }
-            
+
             for participant_id in chat["participants"]:
                 await manager.send_message(broadcast_msg, participant_id)
                 

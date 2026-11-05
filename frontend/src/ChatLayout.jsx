@@ -44,7 +44,7 @@ export default function ChatLayout() {
 
   useEffect(() => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({"behaviour": "smooth"})
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
     }
   }, [messages])
 
@@ -68,6 +68,11 @@ export default function ChatLayout() {
         clearTimeout(pending.timeoutId)
         pendingMessageRef.current = null
         if (data.ok) {
+          if (data.message && activeChatRef.current?.id === data.message.chat_id) {
+            setMessages(prev => prev.some(msg => msg.id === data.message.id)
+              ? prev
+              : [...prev, data.message])
+          }
           setMessageInput('')
           setSendError('')
         } else {
@@ -75,13 +80,16 @@ export default function ChatLayout() {
         }
         return
       }
-      if (data.event == "new_message") {
+      if (data.event === "new_message" && data.message) {
         setMessages(prev => {
-          if (activeChatRef.current && data.message.chat_id === activeChatRef.current.id) {
-            return [...prev, data.message];
+          if (
+            activeChatRef.current?.id === data.message.chat_id &&
+            !prev.some(msg => msg.id === data.message.id)
+          ) {
+            return [...prev, data.message]
           }
-          return prev;
-        });
+          return prev
+        })
       }
     }
 

@@ -54,9 +54,12 @@ def get_user_chats(request: Request):
 def get_chat_messages(chat_id: str, request: Request):
     user_id = get_current_user_id(request)
 
-    chats = database.get_collection("chats").find_one({"chat_id": chat_id})
-    if not chats:
-        raise HTTPException(stats_code=404, details="Chat not found")
+    chat = database.get_collection("chats").find_one({
+        "chat_id": chat_id,
+        "participants": user_id
+    })
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
     
     messages = list(database.get_collection("messages").find({"chat_id": chat_id}).sort("timestamp", 1))
 
